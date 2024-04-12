@@ -1,65 +1,102 @@
-import praw
-import creds
 import pandas as pd
+import praw
+import datetime
+import pytz
 from google.cloud import storage
-from google.cloud import bigquery
+import os
+import creds
 
-# Reddit Scraping Function
-def scrape_keyword(subreddits, keyword, limit=50):
-    reddit = praw.Reddit(client_id = creds.CLIENT_ID,          # your client id
-                      client_secret = creds.CLIENT_SECRET,        # your client secret
-                      user_agent = creds.USER_AGENT,)
-    posts_data = []
+def to_unix_timestamp(date_str, date_format='%Y-%m-%d %H:%M:%S', timezone=pytz.utc):
+    """
+    Convert a date string to a Unix timestamp.
+    
+    :param date_str: Date string
+    :param date_format: Format of the date string
+    :param timezone: Timezone for the date
+    :return: Unix timestamp
+    """
+    dt = datetime.datetime.strptime(date_str, date_format)
+    dt_tz = timezone.localize(dt)
+    return dt_tz.timestamp()
+
+def upload_to_gcs(bucket_name, data, file_name):
+    """
+    Uploads data to Google Cloud Storage.
+
+    :param bucket_name: The name of the GCS bucket
+    :param data: The DataFrame to upload
+    :param file_name: The name of the file to create in GCS
+    """
+    # Initialize GCS client
+    client = storage.Client()
+    bucket = client.get_bucket(bucket_name)
+
+    # Convert DataFrame to CSV
+    csv_data = data.to_csv(index=False)
+
+    # Create a new blob and upload the file's content
+    blob = bucket.blob(file_name)
+    blob.upload_from_string(csv_data, content_type='text/csv')
+    
+    print(f"Uploaded {file_name} to {bucket_name}.")
+
+def scrape_keyword(subreddits, keyword, start_date, end_date, limit=500, bucket_name='your-bucket-name'):
+    # Initialize praw Reddit instance with your credentials
+    reddit = praw.Reddit(client_id=creds.CLIENT_ID,          # your client id
+                         client_secret=creds.CLIENT_SECRET,  # your client secret
+                         user_agent=creds.USER_AGENT,)       # your user agent
+    
+    # Convert start and end dates to Unix timestamps
+    start_timestamp = to_unix_timestamp(start_date)
+    end_timestamp = to_unix_timestamp(end_date)
+    
     for subreddit_name in subreddits:
+        posts_data = []
         subreddit = reddit.subreddit(subreddit_name)
         for post in subreddit.search(keyword, limit=limit):
-            post_data = {
-                'title': post.title,
-                'author': str(post.author),
-                'score': post.score,
-                'id': post.id,
-                'subreddit': str(post.subreddit),
-                'url': post.url,
-                'created_utc': post.created_utc,
-                'selftext': post.selftext,
-                'num_comments': post.num_comments
-            }
-            posts_data.append(post_data)
-    posts_df = pd.DataFrame(posts_data)
-    posts_df.sort_values(by='created_utc', ascending=False, inplace=True)
-    return posts_df
+            created_utc = post.created_utc
+            # Filter posts by the specified timestamp range
+            if start_timestamp <= created_utc <= end_timestamp:
+                post_data = {
+                    'title': post.title,
+                    'author': str(post.author),
+                    'score': post.score,
+                    'subreddit': str(post.subreddit),
+                    'url': post.url,
+                    'created_utc': created_utc,
+                    'num_comments': post.num_comments
+                }
+                posts_data.append(post_data)
 
-# Google Cloud Storage Upload Function
-def upload_to_gcs(bucket_name, dataframe, destination_blob_name):
-    storage_client = storage.Client()
-    bucket = storage_client.bucket(bucket_name)
-    blob = bucket.blob(destination_blob_name)
-    blob.upload_from_string(dataframe.to_csv(index=False), 'text/csv')
-    print(f"Data uploaded to {destination_blob_name} in bucket {bucket_name}.")
+        # Convert the collected data into a DataFrame
+        posts_df = pd.DataFrame(posts_data)
+        
+        if not posts_df.empty:
+            # Upload data to GCS for each subreddit
+            current_time = datetime.datetime.utcnow().strftime('%Y-%m-%d_%H-%M-%S')
+            file_name = f"{subreddit_name}_{current_time}.csv"
+            upload_to_gcs(bucket_name, posts_df, file_name)
 
-# Google BigQuery Upload Function
-def upload_to_bigquery(dataframe, project_id, dataset_id, table_id):
-    client = bigquery.Client(project=project_id)
-    table_ref = client.dataset(dataset_id).table(table_id)
-    job = client.load_table_from_dataframe(dataframe, table_ref, location="US")  # Change location if needed
-    job.result()  # Wait for the job to complete
-    print(f"Loaded {job.output_rows} rows into {dataset_id}:{table_id}.")
+# Example start and end dates
+start_date = "2021-04-05 00:00:00"  # YYYY-MM-DD HH:MM:SS
+end_date = "2023-04-10 23:59:59"    # Adjust this as needed
 
-# Example usage
-subreddits = ['politics', 'worldnews']
-keyword = "global warming"
-limit = 50
-bucket_name = 'your_bucket_name'
-gcs_file_name = 'subreddit_data.csv'
-project_id = 'your_project_id'
-dataset_id = 'your_dataset_id'
-table_id = 'your_table_id'
+# Define a list of subreddits you want to scrape
+subreddits = ['politics', 'worldnews', 'news']
 
-# Scrape data
-dataframe = scrape_keyword(subreddits, keyword, limit)
+# Specify your keyword(s) and the number of posts (limit) you want to fetch
+keyword = "modi, BJP, shah"
 
-# Upload to Google Cloud Storage
-upload_to_gcs(bucket_name, dataframe, gcs_file_name)
+limit = 500
 
-# Upload to Google BigQuery
-upload_to_bigquery(dataframe, project_id, dataset_id, table_id)
+# Set the name of your GCS bucket
+bucket_name = 'subreddit_bucket_1'
+
+# Ensure your Google Cloud credentials are set
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "path/to/your/credentials-file.json"
+
+# Fetch the data and upload to GCS
+scrape_keyword(subreddits, keyword, start_date, end_date, limit, bucket_name)
+
+# Print completion message
+print(f"Data scraped for the period: {start_date} to {end_date} and uploaded to GCS.")
