@@ -1,0 +1,3 @@
+CLIENT_ID = 'R2hyuU2V_wnLGBZyFEVLtw'
+CLIENT_SECRET = 'ayv3CTLaTdIot3qpXqqoGCrQq8KM3A'
+USER_AGENT = 'web bot'
