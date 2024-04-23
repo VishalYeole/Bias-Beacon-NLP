@@ -40,7 +40,7 @@ def upload_to_gcs(bucket_name, data, file_name):
     
     print(f"Uploaded {file_name} to {bucket_name}.")
 
-def scrape_subreddit(subreddits, start_date, end_date, limit=25000, bucket_name='your-bucket-name'):
+def scrape_subreddit(subreddits, start_date, end_date, limit=1000, bucket_name='your-bucket-name'):
     # Initialize praw Reddit instance with your credentials
     reddit = praw.Reddit(client_id=credsam.CLIENT_ID,
                          client_secret=credsam.CLIENT_SECRET,
@@ -77,14 +77,14 @@ def scrape_subreddit(subreddits, start_date, end_date, limit=25000, bucket_name=
             upload_to_gcs(bucket_name, posts_df, file_name)
 
 # Example start and end dates
-start_date = "2021-01-20 00:00:00"  # YYYY-MM-DD HH:MM:SS
-end_date = "2024-04-22 23:59:59"    # Adjust this as needed
+start_date = "2024-01-01 00:00:00"  # YYYY-MM-DD HH:MM:SS
+end_date = "2024-09-03 23:59:59"    # Adjust this as needed
 
 # Define a list of subreddits you want to scrape
 subreddits = ['republican']
 
 # Set the number of posts (limit) you want to fetch
-limit = 25000
+limit = 1000
 
 # Set the name of your GCS bucket
 bucket_name = 'bucket-2-republican'
